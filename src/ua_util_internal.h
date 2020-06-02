@@ -14,22 +14,25 @@
 #ifndef UA_UTIL_H_
 #define UA_UTIL_H_
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#define UA_INTERNAL
+#include <open62541/types.h>
+#include <open62541/util.h>
 
-/* BSD Queue Macros */
-#include "ua_types.h"
-#include "../deps/queue.h"
+_UA_BEGIN_DECLS
 
 /* Macro-Expand for MSVC workarounds */
 #define UA_MACRO_EXPAND(x) x
 
-/* Integer Shortnames
- * ------------------
- * These are not exposed on the public API, since many user-applications make
- * the same definitions in their headers. */
+/* Print a NodeId in logs */
+#define UA_LOG_NODEID_WRAP(NODEID, LOG) {   \
+    UA_String nodeIdStr = UA_STRING_NULL;   \
+    UA_NodeId_print(NODEID, &nodeIdStr);    \
+    LOG;                                    \
+    UA_String_clear(&nodeIdStr);            \
+}
 
+/* Short names for integer. These are not exposed on the public API, since many
+ * user-applications make the same definitions in their headers. */
 typedef UA_Byte u8;
 typedef UA_SByte i8;
 typedef UA_UInt16 u16;
@@ -40,131 +43,120 @@ typedef UA_UInt64 u64;
 typedef UA_Int64 i64;
 typedef UA_StatusCode status;
 
-/* Atomic Operations
- * -----------------
- * Atomic operations that synchronize across processor cores (for
- * multithreading). Only the inline-functions defined next are used. Replace
- * with architecture-specific operations if necessary. */
-#ifndef UA_ENABLE_MULTITHREADING
-# define UA_atomic_sync()
-#else
-# ifdef _MSC_VER /* Visual Studio */
-#  define UA_atomic_sync() _ReadWriteBarrier()
-# else /* GCC/Clang */
-#  define UA_atomic_sync() __sync_synchronize()
-# endif
-#endif
-
-static UA_INLINE void *
-UA_atomic_xchg(void * volatile * addr, void *newptr) {
-#ifndef UA_ENABLE_MULTITHREADING
-    void *old = *addr;
-    *addr = newptr;
-    return old;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedExchangePointer(addr, newptr);
-# else /* GCC/Clang */
-    return __sync_lock_test_and_set(addr, newptr);
-# endif
-#endif
-}
-
-static UA_INLINE void *
-UA_atomic_cmpxchg(void * volatile * addr, void *expected, void *newptr) {
-#ifndef UA_ENABLE_MULTITHREADING
-    void *old = *addr;
-    if(old == expected) {
-        *addr = newptr;
-    }
-    return old;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedCompareExchangePointer(addr, expected, newptr);
-# else /* GCC/Clang */
-    return __sync_val_compare_and_swap(addr, expected, newptr);
-# endif
-#endif
-}
-
-static UA_INLINE uint32_t
-UA_atomic_addUInt32(volatile uint32_t *addr, uint32_t increase) {
-#ifndef UA_ENABLE_MULTITHREADING
-    *addr += increase;
-    return *addr;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedExchangeAdd(addr, increase) + increase;
-# else /* GCC/Clang */
-    return __sync_add_and_fetch(addr, increase);
-# endif
-#endif
-}
-
-static UA_INLINE size_t
-UA_atomic_addSize(volatile size_t *addr, size_t increase) {
-#ifndef UA_ENABLE_MULTITHREADING
-    *addr += increase;
-    return *addr;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedExchangeAdd(addr, increase) + increase;
-# else /* GCC/Clang */
-    return __sync_add_and_fetch(addr, increase);
-# endif
-#endif
-}
-
-static UA_INLINE uint32_t
-UA_atomic_subUInt32(volatile uint32_t *addr, uint32_t decrease) {
-#ifndef UA_ENABLE_MULTITHREADING
-    *addr -= decrease;
-    return *addr;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedExchangeSub(addr, decrease) - decrease;
-# else /* GCC/Clang */
-    return __sync_sub_and_fetch(addr, decrease);
-# endif
-#endif
-}
-
-static UA_INLINE size_t
-UA_atomic_subSize(volatile size_t *addr, size_t decrease) {
-#ifndef UA_ENABLE_MULTITHREADING
-    *addr -= decrease;
-    return *addr;
-#else
-# ifdef _MSC_VER /* Visual Studio */
-    return _InterlockedExchangeSub(addr, decrease) - decrease;
-# else /* GCC/Clang */
-    return __sync_sub_and_fetch(addr, decrease);
-# endif
-#endif
-}
-
-/* Utility Functions
+/**
+ * Utility Functions
  * ----------------- */
 
-/* Convert given byte string to a positive number. Returns the number of valid
- * digits. Stops if a non-digit char is found and returns the number of digits
- * up to that point. */
-size_t UA_readNumber(u8 *buf, size_t buflen, u32 *number);
+/* Get the number of optional fields contained in an structure type */
+size_t UA_EXPORT
+getCountOfOptionalFields(const UA_DataType *type);
 
-#ifndef UA_MIN
-#define UA_MIN(A,B) (A > B ? B : A)
-#endif
-
-#ifndef UA_MAX
-#define UA_MAX(A,B) (A > B ? A : B)
-#endif
-
+/* Dump packet for debugging / fuzzing */
 #ifdef UA_DEBUG_DUMP_PKGS
-void UA_EXPORT UA_dump_hex_pkg(UA_Byte* buffer, size_t bufferLen);
+void UA_EXPORT
+UA_dump_hex_pkg(UA_Byte* buffer, size_t bufferLen);
 #endif
 
-#ifdef __cplusplus
-} // extern "C"
+/* Unions that represent any of the supported request or response message */
+typedef union {
+    UA_RequestHeader requestHeader;
+    UA_FindServersRequest findServersRequest;
+    UA_GetEndpointsRequest getEndpointsRequest;
+#ifdef UA_ENABLE_DISCOVERY
+# ifdef UA_ENABLE_DISCOVERY_MULTICAST
+    UA_FindServersOnNetworkRequest findServersOnNetworkRequest;
+# endif
+    UA_RegisterServerRequest registerServerRequest;
+    UA_RegisterServer2Request registerServer2Request;
 #endif
+    UA_OpenSecureChannelRequest openSecureChannelRequest;
+    UA_CreateSessionRequest createSessionRequest;
+    UA_ActivateSessionRequest activateSessionRequest;
+    UA_CloseSessionRequest closeSessionRequest;
+    UA_AddNodesRequest addNodesRequest;
+    UA_AddReferencesRequest addReferencesRequest;
+    UA_DeleteNodesRequest deleteNodesRequest;
+    UA_DeleteReferencesRequest deleteReferencesRequest;
+    UA_BrowseRequest browseRequest;
+    UA_BrowseNextRequest browseNextRequest;
+    UA_TranslateBrowsePathsToNodeIdsRequest translateBrowsePathsToNodeIdsRequest;
+    UA_RegisterNodesRequest registerNodesRequest;
+    UA_UnregisterNodesRequest unregisterNodesRequest;
+    UA_ReadRequest readRequest;
+    UA_WriteRequest writeRequest;
+#ifdef UA_ENABLE_HISTORIZING
+    UA_HistoryReadRequest historyReadRequest;
+    UA_HistoryUpdateRequest historyUpdateRequest;
+#endif
+#ifdef UA_ENABLE_METHODCALLS
+    UA_CallRequest callRequest;
+#endif
+#ifdef UA_ENABLE_SUBSCRIPTIONS
+    UA_CreateMonitoredItemsRequest createMonitoredItemsRequest;
+    UA_DeleteMonitoredItemsRequest deleteMonitoredItemsRequest;
+    UA_ModifyMonitoredItemsRequest modifyMonitoredItemsRequest;
+    UA_SetMonitoringModeRequest setMonitoringModeRequest;
+    UA_CreateSubscriptionRequest createSubscriptionRequest;
+    UA_ModifySubscriptionRequest modifySubscriptionRequest;
+    UA_SetPublishingModeRequest setPublishingModeRequest;
+    UA_PublishRequest publishRequest;
+    UA_RepublishRequest republishRequest;
+    UA_DeleteSubscriptionsRequest deleteSubscriptionsRequest;
+#endif
+} UA_Request;
+
+typedef union {
+    UA_ResponseHeader responseHeader;
+    UA_FindServersResponse findServersResponse;
+    UA_GetEndpointsResponse getEndpointsResponse;
+#ifdef UA_ENABLE_DISCOVERY
+# ifdef UA_ENABLE_DISCOVERY_MULTICAST
+    UA_FindServersOnNetworkResponse findServersOnNetworkResponse;
+# endif
+    UA_RegisterServerResponse registerServerResponse;
+    UA_RegisterServer2Response registerServer2Response;
+#endif
+    UA_OpenSecureChannelResponse openSecureChannelResponse;
+    UA_CreateSessionResponse createSessionResponse;
+    UA_ActivateSessionResponse activateSessionResponse;
+    UA_CloseSessionResponse closeSessionResponse;
+    UA_AddNodesResponse addNodesResponse;
+    UA_AddReferencesResponse addReferencesResponse;
+    UA_DeleteNodesResponse deleteNodesResponse;
+    UA_DeleteReferencesResponse deleteReferencesResponse;
+    UA_BrowseResponse browseResponse;
+    UA_BrowseNextResponse browseNextResponse;
+    UA_TranslateBrowsePathsToNodeIdsResponse translateBrowsePathsToNodeIdsResponse;
+    UA_RegisterNodesResponse registerNodesResponse;
+    UA_UnregisterNodesResponse unregisterNodesResponse;
+    UA_ReadResponse readResponse;
+    UA_WriteResponse writeResponse;
+#ifdef UA_ENABLE_HISTORIZING
+    UA_HistoryReadResponse historyReadResponse;
+    UA_HistoryUpdateResponse historyUpdateResponse;
+#endif
+#ifdef UA_ENABLE_METHODCALLS
+    UA_CallResponse callResponse;
+#endif
+#ifdef UA_ENABLE_SUBSCRIPTIONS
+    UA_CreateMonitoredItemsResponse createMonitoredItemsResponse;
+    UA_DeleteMonitoredItemsResponse deleteMonitoredItemsResponse;
+    UA_ModifyMonitoredItemsResponse modifyMonitoredItemsResponse;
+    UA_SetMonitoringModeResponse setMonitoringModeResponse;
+    UA_CreateSubscriptionResponse createSubscriptionResponse;
+    UA_ModifySubscriptionResponse modifySubscriptionResponse;
+    UA_SetPublishingModeResponse setPublishingModeResponse;
+    UA_PublishResponse publishResponse;
+    UA_RepublishResponse republishResponse;
+    UA_DeleteSubscriptionsResponse deleteSubscriptionsResponse;
+#endif
+} UA_Response;
+
+/* Do not expose UA_String_equal_ignorecase to public API as it currently only handles
+ * ASCII strings, and not UTF8! */
+UA_Boolean UA_EXPORT
+UA_String_equal_ignorecase(const UA_String *s1, const UA_String *s2);
+
+_UA_END_DECLS
 
 #endif /* UA_UTIL_H_ */

@@ -3,15 +3,16 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #define _XOPEN_SOURCE 500
-#include <stdlib.h>
-#include <stdio.h>
+#include <open62541/server.h>
+#include <open62541/types_generated.h>
+#include <open62541/types_generated_handling.h>
+#include <open62541/util.h>
 
-#include "ua_types.h"
-#include "ua_server.h"
-#include "ua_types_generated.h"
-#include "ua_types_generated_handling.h"
 #include "ua_types_encoding_binary.h"
-#include "ua_util.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "check.h"
 
 /* Define types to a dummy value if they are not available (e.g. not built with
@@ -83,15 +84,15 @@ START_TEST(arrayCopyShallMakeADeepCopy) {
     a1[2] = (UA_String){3, (UA_Byte*)"ccc"};
     // when
     UA_String *a2;
-    UA_Int32 retval = UA_Array_copy((const void *)a1, 3, (void **)&a2, &UA_TYPES[UA_TYPES_STRING]);
+    UA_UInt32 retval = UA_Array_copy((const void *)a1, 3, (void **)&a2, &UA_TYPES[UA_TYPES_STRING]);
     // then
     ck_assert_int_eq(retval, UA_STATUSCODE_GOOD);
-    ck_assert_int_eq(a1[0].length, 1);
-    ck_assert_int_eq(a1[1].length, 2);
-    ck_assert_int_eq(a1[2].length, 3);
-    ck_assert_int_eq(a1[0].length, a2[0].length);
-    ck_assert_int_eq(a1[1].length, a2[1].length);
-    ck_assert_int_eq(a1[2].length, a2[2].length);
+    ck_assert_uint_eq(a1[0].length, 1);
+    ck_assert_uint_eq(a1[1].length, 2);
+    ck_assert_uint_eq(a1[2].length, 3);
+    ck_assert_uint_eq(a1[0].length, a2[0].length);
+    ck_assert_uint_eq(a1[1].length, a2[1].length);
+    ck_assert_uint_eq(a1[2].length, a2[2].length);
     ck_assert_ptr_ne(a1[0].data, a2[0].data);
     ck_assert_ptr_ne(a1[1].data, a2[1].data);
     ck_assert_ptr_ne(a1[2].data, a2[2].data);
@@ -107,9 +108,13 @@ START_TEST(encodeShallYieldDecode) {
     /* floating point types may change the representaton due to several possible NaN values. */
     if(_i != UA_TYPES_FLOAT || _i != UA_TYPES_DOUBLE ||
        _i != UA_TYPES_CREATESESSIONREQUEST || _i != UA_TYPES_CREATESESSIONRESPONSE ||
-       _i != UA_TYPES_VARIABLEATTRIBUTES || _i != UA_TYPES_READREQUEST ||
+       _i != UA_TYPES_VARIABLEATTRIBUTES || _i != UA_TYPES_READREQUEST
+#ifdef UA_ENABLE_SUBSCRIPTIONS
+       ||
        _i != UA_TYPES_MONITORINGPARAMETERS || _i != UA_TYPES_MONITOREDITEMCREATERESULT ||
-       _i != UA_TYPES_CREATESUBSCRIPTIONREQUEST || _i != UA_TYPES_CREATESUBSCRIPTIONRESPONSE)
+       _i != UA_TYPES_CREATESUBSCRIPTIONREQUEST || _i != UA_TYPES_CREATESUBSCRIPTIONRESPONSE
+#endif
+       )
         return;
 
     // given
@@ -130,7 +135,7 @@ START_TEST(encodeShallYieldDecode) {
     // when
     void *obj2 = UA_new(&UA_TYPES[_i]);
     size_t offset = 0;
-    retval = UA_decodeBinary(&msg1, &offset, obj2, &UA_TYPES[_i], 0, NULL);
+    retval = UA_decodeBinary(&msg1, &offset, obj2, &UA_TYPES[_i], NULL);
     ck_assert_msg(retval == UA_STATUSCODE_GOOD, "could not decode idx=%d,nodeid=%i",
                   _i, UA_TYPES[_i].typeId.identifier.numeric);
     ck_assert(!memcmp(obj1, obj2, UA_TYPES[_i].memSize)); // bit identical decoding
@@ -162,8 +167,16 @@ START_TEST(decodeShallFailWithTruncatedBufferButSurvive) {
 #ifdef UA_ENABLE_DISCOVERY
         _i == UA_TYPES_DISCOVERYCONFIGURATION ||
 #endif
+#ifdef UA_ENABLE_SUBSCRIPTIONS
         _i == UA_TYPES_FILTEROPERAND ||
         _i == UA_TYPES_UNION ||
+#endif
+#ifdef UA_TYPES_FRAME
+        _i == UA_TYPES_FRAME ||
+        _i == UA_TYPES_ORIENTATION ||
+        _i == UA_TYPES_VECTOR ||
+        _i == UA_TYPES_CARTESIANCOORDINATES ||
+#endif
         _i == UA_TYPES_HISTORYREADDETAILS ||
         _i == UA_TYPES_NOTIFICATIONDATA ||
         _i == UA_TYPES_MONITORINGFILTER ||
@@ -199,7 +212,7 @@ START_TEST(decodeShallFailWithTruncatedBufferButSurvive) {
     // when
     void *obj2 = UA_new(&UA_TYPES[_i]);
     size_t offset = 0;
-    retval = UA_decodeBinary(&msg1, &offset, obj2, &UA_TYPES[_i], 0, NULL);
+    retval = UA_decodeBinary(&msg1, &offset, obj2, &UA_TYPES[_i], NULL);
     ck_assert_int_ne(retval, UA_STATUSCODE_GOOD);
     UA_delete(obj2, &UA_TYPES[_i]);
     UA_ByteString_deleteMembers(&msg1);
@@ -212,8 +225,8 @@ START_TEST(decodeScalarBasicTypeFromRandomBufferShallSucceed) {
     // given
     void *obj1 = NULL;
     UA_ByteString msg1;
-    UA_Int32 retval = UA_STATUSCODE_GOOD;
-    UA_Int32 buflen = 256;
+    UA_UInt32 retval = UA_STATUSCODE_GOOD;
+    UA_UInt32 buflen = 256;
     retval = UA_ByteString_allocBuffer(&msg1, buflen); // fixed size
 #ifdef _WIN32
     srand(42);
@@ -221,7 +234,7 @@ START_TEST(decodeScalarBasicTypeFromRandomBufferShallSucceed) {
     srandom(42);
 #endif
     for(int n = 0;n < RANDOM_TESTS;n++) {
-        for(UA_Int32 i = 0;i < buflen;i++) {
+        for(UA_UInt32 i = 0;i < buflen;i++) {
 #ifdef _WIN32
             UA_UInt32 rnd;
             rnd = rand();
@@ -232,7 +245,7 @@ START_TEST(decodeScalarBasicTypeFromRandomBufferShallSucceed) {
         }
         size_t pos = 0;
         obj1 = UA_new(&UA_TYPES[_i]);
-        retval |= UA_decodeBinary(&msg1, &pos, obj1, &UA_TYPES[_i], 0, NULL);
+        retval |= UA_decodeBinary(&msg1, &pos, obj1, &UA_TYPES[_i], NULL);
         //then
         ck_assert_msg(retval == UA_STATUSCODE_GOOD,
                       "Decoding %d from random buffer",
@@ -247,8 +260,8 @@ END_TEST
 START_TEST(decodeComplexTypeFromRandomBufferShallSurvive) {
     // given
     UA_ByteString msg1;
-    UA_Int32 retval = UA_STATUSCODE_GOOD;
-    UA_Int32 buflen = 256;
+    UA_UInt32 retval = UA_STATUSCODE_GOOD;
+    UA_UInt32 buflen = 256;
     retval = UA_ByteString_allocBuffer(&msg1, buflen); // fixed size
 #ifdef _WIN32
     srand(42);
@@ -257,7 +270,7 @@ START_TEST(decodeComplexTypeFromRandomBufferShallSurvive) {
 #endif
     // when
     for(int n = 0;n < RANDOM_TESTS;n++) {
-        for(UA_Int32 i = 0;i < buflen;i++) {
+        for(UA_UInt32 i = 0;i < buflen;i++) {
 #ifdef _WIN32
             UA_UInt32 rnd;
             rnd = rand();
@@ -268,7 +281,7 @@ START_TEST(decodeComplexTypeFromRandomBufferShallSurvive) {
         }
         size_t pos = 0;
         void *obj1 = UA_new(&UA_TYPES[_i]);
-        retval |= UA_decodeBinary(&msg1, &pos, obj1, &UA_TYPES[_i], 0, NULL);
+        retval |= UA_decodeBinary(&msg1, &pos, obj1, &UA_TYPES[_i], NULL);
         UA_delete(obj1, &UA_TYPES[_i]);
     }
 
@@ -283,11 +296,19 @@ START_TEST(calcSizeBinaryShallBeCorrect) {
     if(_i == UA_TYPES_VARIANT ||
        _i == UA_TYPES_VARIABLEATTRIBUTES ||
        _i == UA_TYPES_VARIABLETYPEATTRIBUTES ||
+#ifdef UA_ENABLE_SUBSCRIPTIONS
        _i == UA_TYPES_FILTEROPERAND ||
+#endif
 #ifdef UA_ENABLE_DISCOVERY
        _i == UA_TYPES_DISCOVERYCONFIGURATION ||
 #endif
        _i == UA_TYPES_UNION ||
+#ifdef UA_TYPES_FRAME
+       _i == UA_TYPES_FRAME ||
+       _i == UA_TYPES_ORIENTATION ||
+       _i == UA_TYPES_VECTOR ||
+       _i == UA_TYPES_CARTESIANCOORDINATES ||
+#endif
        _i == UA_TYPES_HISTORYREADDETAILS ||
        _i == UA_TYPES_NOTIFICATIONDATA ||
        _i == UA_TYPES_MONITORINGFILTER ||
@@ -306,17 +327,17 @@ START_TEST(calcSizeBinaryShallBeCorrect) {
         return;
     void *obj = UA_new(&UA_TYPES[_i]);
     size_t predicted_size = UA_calcSizeBinary(obj, &UA_TYPES[_i]);
-    ck_assert_int_ne(predicted_size, 0);
+    ck_assert_uint_ne(predicted_size, 0);
     UA_ByteString msg;
     UA_StatusCode retval = UA_ByteString_allocBuffer(&msg, predicted_size);
-    ck_assert_int_eq(retval, UA_STATUSCODE_GOOD);
+    ck_assert_uint_eq(retval, UA_STATUSCODE_GOOD);
     UA_Byte *pos = msg.data;
     const UA_Byte *end = &msg.data[msg.length];
     retval = UA_encodeBinary(obj, &UA_TYPES[_i], &pos, &end, NULL, NULL);
     if(retval)
         printf("%i\n",_i);
-    ck_assert_int_eq(retval, UA_STATUSCODE_GOOD);
-    ck_assert_int_eq((uintptr_t)(pos - msg.data), predicted_size);
+    ck_assert_uint_eq(retval, UA_STATUSCODE_GOOD);
+    ck_assert_uint_eq((uintptr_t)(pos - msg.data), predicted_size);
     UA_delete(obj, &UA_TYPES[_i]);
     UA_ByteString_deleteMembers(&msg);
 }
